@@ -78,14 +78,22 @@ def main() -> int:
     msg_text = MESSAGES[DAY_INDEX % len(MESSAGES)]
     results, failures = {}, []
 
-    # 1) Registry claim — STRICT: status final cuma dari readback, bukan dari respon write
-    ok, body = h1(f"/kv/did/{fp}/set/{urllib.parse.quote(did, safe='')}?if_absent=1")
-    _w = f"{ok}:{body.strip()[:60]}"
+    # 1) Registry — KLAIM kalau belum ada, atau REFRESH (touch) kalau udah punya,
+    #    biar note ga di-reclaim server (idle 7 hari). Status final dari readback.
+    enc = urllib.parse.quote(did, safe='')
+    okc, bc = h1(f"/kv/did/{fp}/set/{enc}?if_absent=1")
+    if "already exists" in bc or "409" in bc[:5]:
+        # note ini punya kita — touch value yang sama utk reset idle timer
+        h1(f"/kv/did/{fp}/set/{enc}")
+        action = "refreshed"
+    else:
+        action = "claimed"
     ok2, rb = h1(f"/kv/did/{fp}")
     if ok2 and did in rb:
-        results["registry"] = "CLAIMED+verified"
+        results["registry"] = f"{action}+verified"
     else:
-        results["registry"] = f"pending (write={_w}, readback={'empty' if not rb else 'no-match'})"
+        results["registry"] = f"pending (action={action}, readback={'empty' if not rb else 'no-match'})"
+        failures.append("registry")
 
     # 2) Signed check-in — respon server langsung nampilin 20 pesan terakhir
     room, nonce = "lobby", str(int(time.time() * 1000))
